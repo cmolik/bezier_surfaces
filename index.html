@@ -311,8 +311,8 @@
             gridHelper.position.y = -3;
             scene.add(gridHelper);
 
-            // Setup Control Points from Default Preset (wave)
-            loadPreset('wave');
+            // Setup Control Points from Default Preset (dome)
+            loadPreset('dome');
 
             // Initialize Objects
             createControlPointSpheres();
@@ -677,7 +677,11 @@
             });
 
             document.getElementById('toggle-transverse-curve').addEventListener('change', (e) => {
-                transverseCurveLine.visible = e.target.checked;
+                const visible = e.target.checked;
+                transverseCurveLine.visible = visible;
+                if (evaluatedPointSphere) {
+                    evaluatedPointSphere.visible = visible;
+                }
             });
 
             // Presets
