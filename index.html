@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bézier Surface Evaluator - 4-Curve Evaluation (WebGL / Three.js)</title>
+    <!-- Tailwind CSS for modern UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls for camera manipulation -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow: hidden; background-color: #f8fafc; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+        }
+        input[type=range] {
+            accent-color: #2563eb;
+        }
+    </style>
+</head>
+<body class="text-slate-800 h-screen w-screen relative select-none">
+
+    <!-- Canvas Container -->
+    <div id="canvas-container" class="w-full h-full absolute top-0 left-0"></div>
+
+    <!-- UI Header Overlay -->
+    <div class="absolute top-4 left-4 z-10 pointer-events-none">
+        <div class="glass-panel p-4 rounded-xl max-w-md pointer-events-auto">
+            <h1 class="text-xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                <i class="fa-solid fa-cube mr-2 text-blue-600"></i>Bézier Surface Evaluator
+            </h1>
+            <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+                Interactive visualization of point evaluation on a Bézier surface. Choose the parameter evaluation order (<span class="text-blue-600 font-semibold">u &rarr; v</span> or <span class="text-emerald-600 font-semibold">v &rarr; u</span>) to verify that both evaluation paths lead to the exact same point.
+            </p>
+        </div>
+    </div>
+
+    <!-- Controls Panel Right -->
+    <div class="absolute top-4 right-4 bottom-4 w-80 z-10 flex flex-col gap-4 pointer-events-none">
+        <!-- Main Parameters Panel -->
+        <div class="glass-panel p-5 rounded-xl flex flex-col gap-4 pointer-events-auto overflow-y-auto max-h-full">
+            <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <i class="fa-solid fa-sliders text-blue-600"></i> Surface Parameters
+            </h2>
+
+            <!-- Evaluation Order Selector -->
+            <div class="bg-slate-100 p-3 rounded-lg border border-slate-200">
+                <label class="block text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-right-left text-indigo-600"></i> Evaluation Order:
+                </label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-order-uv" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-white bg-indigo-600 border-indigo-500 shadow-sm">
+                        u &rarr; v (Rows)
+                    </button>
+                    <button id="btn-order-vu" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-slate-600 bg-slate-200 border-slate-300 hover:text-slate-900 hover:bg-slate-300">
+                        v &rarr; u (Columns)
+                    </button>
+                </div>
+                <div id="order-description" class="text-[10px] text-slate-500 mt-2 leading-tight">
+                    First evaluates 4 u-curves, then the transverse v-curve.
+                </div>
+            </div>
+
+            <!-- Parameter U Slider -->
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-sm font-medium text-blue-600 flex items-center gap-2">
+                        <span>Parameter u</span>
+                        <span id="u-role-desc" class="text-xs text-slate-500">(4 primary)</span>
+                    </label>
+                    <span id="u-value-display" class="font-mono text-sm font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">0.50</span>
+                </div>
+                <input id="slider-u" type="range" min="0" max="1" step="0.005" value="0.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                <div id="u-slider-help" class="text-[10px] text-slate-500 mt-1">Defines a point on each of the 4 initial curves.</div>
+            </div>
+
+            <!-- Parameter V Slider -->
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-sm font-medium text-emerald-600 flex items-center gap-2">
+                        <span>Parameter v</span>
+                        <span id="v-role-desc" class="text-xs text-slate-500">(transverse)</span>
+                    </label>
+                    <span id="v-value-display" class="font-mono text-sm font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">0.50</span>
+                </div>
+                <input id="slider-v" type="range" min="0" max="1" step="0.005" value="0.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                <div id="v-slider-help" class="text-[10px] text-slate-500 mt-1">Defines the output on the newly created curve.</div>
+            </div>
+
+            <!-- Point Display -->
+            <div class="bg-slate-100 p-3.5 rounded-xl border border-slate-200 font-mono text-xs text-slate-800 shadow-sm">
+                <div class="text-slate-700 text-[11px] mb-2 font-sans font-semibold flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span class="flex items-center gap-1.5 text-slate-800">
+                        <i class="fa-solid fa-location-dot text-rose-600"></i> Position P(u, v)
+                    </span>
+                    <span class="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1 font-mono font-medium">
+                        <i class="fa-solid fa-check text-[9px]"></i> P(u,v) == P(v,u)
+                    </span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center font-mono pt-0.5">
+                    <div class="bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs">
+                        <div class="text-[9px] text-slate-500 font-sans uppercase tracking-wider mb-0.5">X</div>
+                        <div id="pos-x" class="text-blue-700 font-bold text-xs">0.00</div>
+                    </div>
+                    <div class="bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs">
+                        <div class="text-[9px] text-slate-500 font-sans uppercase tracking-wider mb-0.5">Y</div>
+                        <div id="pos-y" class="text-blue-700 font-bold text-xs">0.00</div>
+                    </div>
+                    <div class="bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs">
+                        <div class="text-[9px] text-slate-500 font-sans uppercase tracking-wider mb-0.5">Z</div>
+                        <div id="pos-z" class="text-blue-700 font-bold text-xs">0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-slate-200">
+
+            <!-- Visualization Options -->
+            <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <i class="fa-solid fa-eye text-purple-600"></i> Element Visibility
+            </h2>
+
+            <div class="space-y-2">
+                <label class="flex items-center gap-3 text-xs text-slate-700 cursor-pointer hover:text-slate-900 transition">
+                    <input type="checkbox" id="toggle-surface" checked class="rounded bg-slate-100 border-slate-300 text-blue-600 focus:ring-0">
+                    <span>Bézier Surface (Mesh)</span>
+                </label>
+                <label class="flex items-center gap-3 text-xs text-slate-700 cursor-pointer hover:text-slate-900 transition">
+                    <input type="checkbox" id="toggle-control-net" checked class="rounded bg-slate-100 border-slate-300 text-blue-600 focus:ring-0">
+                    <span>Control Net Grid (4x4)</span>
+                </label>
+                <label class="flex items-center gap-3 text-xs text-slate-700 cursor-pointer hover:text-slate-900 transition">
+                    <input type="checkbox" id="toggle-primary-curves" checked class="rounded bg-slate-100 border-slate-300 text-blue-600 focus:ring-0">
+                    <span id="label-primary-toggle">4 Primary u-Curves (Blue)</span>
+                </label>
+                <label class="flex items-center gap-3 text-xs text-slate-700 cursor-pointer hover:text-slate-900 transition">
+                    <input type="checkbox" id="toggle-transverse-curve" checked class="rounded bg-slate-100 border-slate-300 text-blue-600 focus:ring-0">
+                    <span id="label-transverse-toggle">Transverse v-Curve (Green)</span>
+                </label>
+            </div>
+
+            <!-- Presets -->
+            <div class="pt-2">
+                <label class="block text-xs font-semibold text-slate-500 mb-2">Surface Shape Presets:</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-preset-flat" class="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded border border-slate-300 transition">Flat</button>
+                    <button id="btn-preset-wave" class="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded border border-slate-300 transition">Wave</button>
+                    <button id="btn-preset-saddle" class="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded border border-slate-300 transition">Saddle</button>
+                    <button id="btn-preset-dome" class="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded border border-slate-300 transition">Dome</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legend Overlay Bottom Left -->
+    <div class="absolute bottom-4 left-4 z-10 pointer-events-none hidden md:block">
+        <div class="glass-panel p-3 rounded-xl text-xs flex gap-4 text-slate-700 pointer-events-auto">
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span> <span id="legend-primary">4 Primary u-Curves</span></div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> <span id="legend-interm">Step 1 Points</span></div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-600 inline-block"></span> <span id="legend-transverse">Transverse v-Curve</span></div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-600 inline-block"></span> Result Point P(u,v)</div>
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // Global variables for scene, camera, renderer, controls
+        let scene, camera, renderer, controls;
+        let controlPoints = []; // 4x4 matrix array of Vector3
+        let controlPointSpheres = []; // 3D Mesh spheres for dragging
+        let primaryCurveLines = [];
+        let primaryPointsSpheres = [];
+        let transverseCurveLine = null;
+        let evaluatedPointSphere = null;
+        let controlNetLines = [];
+        let surfaceMesh = null;
+
+        // Interaction & Evaluation state variables
+        let params = { u: 0.5, v: 0.5, evaluationOrder: 'u-first' }; // 'u-first' or 'v-first'
+        let isDragging = false;
+        let selectedSphere = null;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        let dragPlane = new THREE.Plane();
+        let planeIntersect = new THREE.Vector3();
+
+        // Control point resolution grid sizes
+        const GRID_SIZE = 4; // 4x4 control points = cubic Bézier surface
+
+        // Predefined configurations for control points
+        const PRESETS = {
+            flat: [
+                [-3, 0, -3], [-1, 0, -3], [1, 0, -3], [3, 0, -3],
+                [-3, 0, -1], [-1, 0, -1], [1, 0, -1], [3, 0, -1],
+                [-3, 0,  1], [-1, 0,  1], [1, 0,  1], [3, 0,  1],
+                [-3, 0,  3], [-1, 0,  3], [1, 0,  3], [3, 0,  3]
+            ],
+            wave: [
+                [-3,  1, -3], [-1, -1, -3], [1,  1, -3], [3, -1, -3],
+                [-3, -1, -1], [-1,  1, -1], [1, -1, -1], [3,  1, -1],
+                [-3,  1,  1], [-1, -1,  1], [1,  1,  1], [3, -1,  1],
+                [-3, -1,  3], [-1,  1,  3], [1, -1,  3], [3,  1,  3]
+            ],
+            saddle: [
+                [-3,  2, -3], [-1,  1, -3], [1,  1, -3], [3,  2, -3],
+                [-3,  0, -1], [-1, -1, -1], [1, -1, -1], [3,  0, -1],
+                [-3,  0,  1], [-1, -1,  1], [1, -1,  1], [3,  0,  1],
+                [-3,  2,  3], [-1,  1,  3], [1,  1,  3], [3,  2,  3]
+            ],
+            dome: [
+                [-3, -1, -3], [-1,  0, -3], [1,  0, -3], [3, -1, -3],
+                [-3,  0, -1], [-1,  2.5, -1], [1,  2.5, -1], [3,  0, -1],
+                [-3,  0,  1], [-1,  2.5,  1], [1,  2.5,  1], [3,  0,  1],
+                [-3, -1,  3], [-1,  0,  3], [1,  0,  3], [3, -1,  3]
+            ]
+        };
+
+        /**
+         * Bernstein polynomial calculation for n=3 (cubic Bézier curve)
+         */
+        function bernsteinPolynomial(i, t) {
+            const mt = 1 - t;
+            switch(i) {
+                case 0: return mt * mt * mt;
+                case 1: return 3 * mt * mt * t;
+                case 2: return 3 * mt * t * t;
+                case 3: return t * t * t;
+                default: return 0;
+            }
+        }
+
+        /**
+         * Calculate a point on a cubic Bézier curve at parameter t (0..1)
+         */
+        function evaluateBezierCurve(p0, p1, p2, p3, t) {
+            const b0 = bernsteinPolynomial(0, t);
+            const b1 = bernsteinPolynomial(1, t);
+            const b2 = bernsteinPolynomial(2, t);
+            const b3 = bernsteinPolynomial(3, t);
+
+            return new THREE.Vector3(
+                b0*p0.x + b1*p1.x + b2*p2.x + b3*p3.x,
+                b0*p0.y + b1*p1.y + b2*p2.y + b3*p3.y,
+                b0*p0.z + b1*p1.z + b2*p2.z + b3*p3.z
+            );
+        }
+
+        /**
+         * Calculate point on Bézier surface (u, v) directly
+         */
+        function evaluateBezierSurface(u, v) {
+            const tempPoints = [];
+            for (let i = 0; i < 4; i++) {
+                const row = controlPoints[i];
+                tempPoints.push(evaluateBezierCurve(row[0], row[1], row[2], row[3], u));
+            }
+            return evaluateBezierCurve(tempPoints[0], tempPoints[1], tempPoints[2], tempPoints[3], v);
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene setup with light background
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8fafc);
+            scene.fog = new THREE.FogExp2(0xf8fafc, 0.025);
+
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(8, 7, 10);
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting setup for light environment
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+            dirLight.position.set(10, 18, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            const pointLight = new THREE.PointLight(0x2563eb, 0.8, 25);
+            pointLight.position.set(0, 6, 0);
+            scene.add(pointLight);
+
+            // Grid helper for light background floor
+            const gridHelper = new THREE.GridHelper(16, 16, 0x94a3b8, 0xe2e8f0);
+            gridHelper.position.y = -3;
+            scene.add(gridHelper);
+
+            // Setup Control Points from Default Preset (wave)
+            loadPreset('wave');
+
+            // Initialize Objects
+            createControlPointSpheres();
+            createPrimaryCurves();
+            createTransverseCurve();
+            createEvaluatedPoint();
+            createSurfaceMesh();
+
+            // Initial scene update
+            updateAll();
+
+            // Event Listeners setup
+            window.addEventListener('resize', onWindowResize);
+            setupInteractionListeners();
+            setupUIControls();
+        }
+
+        function loadPreset(presetKey) {
+            const coords = PRESETS[presetKey] || PRESETS.wave;
+            controlPoints = [];
+            for (let i = 0; i < GRID_SIZE; i++) {
+                const row = [];
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const idx = i * GRID_SIZE + j;
+                    row.push(new THREE.Vector3(coords[idx][0], coords[idx][1], coords[idx][2]));
+                }
+                controlPoints.push(row);
+            }
+        }
+
+        function createControlPointSpheres() {
+            controlPointSpheres.forEach(s => scene.remove(s));
+            controlPointSpheres = [];
+
+            const sphereGeo = new THREE.SphereGeometry(0.12, 24, 24);
+            const sphereMat = new THREE.MeshStandardMaterial({
+                color: 0x475569,
+                roughness: 0.3,
+                metalness: 0.7
+            });
+
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const sphere = new THREE.Mesh(sphereGeo, sphereMat.clone());
+                    sphere.castShadow = true;
+                    sphere.userData = { i: i, j: j };
+                    scene.add(sphere);
+                    controlPointSpheres.push(sphere);
+                }
+            }
+        }
+
+        function createPrimaryCurves() {
+            primaryCurveLines = [];
+            primaryPointsSpheres = [];
+
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 3 });
+            const ptGeo = new THREE.SphereGeometry(0.14, 20, 20);
+            const ptMat = new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0xb45309, emissiveIntensity: 0.4 });
+
+            for (let i = 0; i < 4; i++) {
+                const geometry = new THREE.BufferGeometry();
+                const line = new THREE.Line(geometry, lineMat);
+                scene.add(line);
+                primaryCurveLines.push(line);
+
+                const pointSphere = new THREE.Mesh(ptGeo, ptMat);
+                scene.add(pointSphere);
+                primaryPointsSpheres.push(pointSphere);
+            }
+        }
+
+        function createTransverseCurve() {
+            const lineMat = new THREE.LineDashedMaterial({
+                color: 0x059669,
+                linewidth: 4,
+                dashSize: 0.2,
+                gapSize: 0.1
+            });
+            const geometry = new THREE.BufferGeometry();
+            transverseCurveLine = new THREE.Line(geometry, lineMat);
+            scene.add(transverseCurveLine);
+        }
+
+        function createEvaluatedPoint() {
+            const ptGeo = new THREE.SphereGeometry(0.22, 32, 32);
+            const ptMat = new THREE.MeshStandardMaterial({
+                color: 0xe11d48,
+                emissive: 0xbe123c,
+                emissiveIntensity: 0.7,
+                roughness: 0.2
+            });
+            evaluatedPointSphere = new THREE.Mesh(ptGeo, ptMat);
+            scene.add(evaluatedPointSphere);
+        }
+
+        function createSurfaceMesh() {
+            const uSegments = 24;
+            const vSegments = 24;
+            const geometry = new THREE.PlaneGeometry(1, 1, uSegments, vSegments);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x4f46e5,
+                wireframe: false,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.45,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+
+            surfaceMesh = new THREE.Mesh(geometry, material);
+            surfaceMesh.receiveShadow = true;
+            scene.add(surfaceMesh);
+        }
+
+        function updateAll() {
+            const u = params.u;
+            const v = params.v;
+            const isUFirst = params.evaluationOrder === 'u-first';
+
+            // 1. Update Control Point Spheres positions
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const idx = i * GRID_SIZE + j;
+                    controlPointSpheres[idx].position.copy(controlPoints[i][j]);
+                }
+            }
+
+            // 2. Evaluate Primary and Transverse Curves based on selected evaluation order
+            const intermediatePoints = [];
+            const curveResolution = 40;
+
+            const firstParam = isUFirst ? u : v;
+            const secondParam = isUFirst ? v : u;
+
+            for (let k = 0; k < 4; k++) {
+                const pts = isUFirst ? 
+                    [controlPoints[k][0], controlPoints[k][1], controlPoints[k][2], controlPoints[k][3]] :
+                    [controlPoints[0][k], controlPoints[1][k], controlPoints[2][k], controlPoints[3][k]];
+
+                const positions = new Float32Array((curveResolution + 1) * 3);
+
+                for (let step = 0; step <= curveResolution; step++) {
+                    const t = step / curveResolution;
+                    const p = evaluateBezierCurve(pts[0], pts[1], pts[2], pts[3], t);
+                    positions[step * 3]     = p.x;
+                    positions[step * 3 + 1] = p.y;
+                    positions[step * 3 + 2] = p.z;
+                }
+
+                primaryCurveLines[k].geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                primaryCurveLines[k].geometry.attributes.position.needsUpdate = true;
+
+                const interPt = evaluateBezierCurve(pts[0], pts[1], pts[2], pts[3], firstParam);
+                primaryPointsSpheres[k].position.copy(interPt);
+                intermediatePoints.push(interPt);
+            }
+
+            // Step 2: Transverse Curve constructed from the 4 intermediate points
+            const transPositions = new Float32Array((curveResolution + 1) * 3);
+            for (let step = 0; step <= curveResolution; step++) {
+                const t = step / curveResolution;
+                const p = evaluateBezierCurve(
+                    intermediatePoints[0],
+                    intermediatePoints[1],
+                    intermediatePoints[2],
+                    intermediatePoints[3],
+                    t
+                );
+                transPositions[step * 3]     = p.x;
+                transPositions[step * 3 + 1] = p.y;
+                transPositions[step * 3 + 2] = p.z;
+            }
+            transverseCurveLine.geometry.setAttribute('position', new THREE.BufferAttribute(transPositions, 3));
+            transverseCurveLine.geometry.attributes.position.needsUpdate = true;
+            transverseCurveLine.computeLineDistances();
+
+            // Step 3: Calculate Final Point on Transverse Curve using secondParam
+            const finalPoint = evaluateBezierCurve(
+                intermediatePoints[0],
+                intermediatePoints[1],
+                intermediatePoints[2],
+                intermediatePoints[3],
+                secondParam
+            );
+            evaluatedPointSphere.position.copy(finalPoint);
+
+            // Update DOM Displays for Point Coordinates
+            document.getElementById('pos-x').textContent = finalPoint.x.toFixed(2);
+            document.getElementById('pos-y').textContent = finalPoint.y.toFixed(2);
+            document.getElementById('pos-z').textContent = finalPoint.z.toFixed(2);
+
+            // 5. Update Surface Mesh
+            if (surfaceMesh && surfaceMesh.visible) {
+                const uSegs = 24;
+                const vSegs = 24;
+                const positions = surfaceMesh.geometry.attributes.position;
+
+                let index = 0;
+                for (let j = 0; j <= vSegs; j++) {
+                    const vVal = j / vSegs;
+                    for (let i = 0; i <= uSegs; i++) {
+                        const uVal = i / uSegs;
+                        const surfPt = evaluateBezierSurface(uVal, vVal);
+                        positions.setXYZ(index++, surfPt.x, surfPt.y, surfPt.z);
+                    }
+                }
+                positions.needsUpdate = true;
+                surfaceMesh.geometry.computeVertexNormals();
+            }
+
+            // 6. Redraw control polygon net lines
+            updateControlNetLines();
+        }
+
+        function updateControlNetLines() {
+            controlNetLines.forEach(l => scene.remove(l));
+            controlNetLines = [];
+
+            const mat = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.6 });
+
+            for (let i = 0; i < 4; i++) {
+                const hGeo = new THREE.BufferGeometry().setFromPoints(controlPoints[i]);
+                const hLine = new THREE.Line(hGeo, mat);
+                scene.add(hLine);
+                controlNetLines.push(hLine);
+
+                const vPoints = [controlPoints[0][i], controlPoints[1][i], controlPoints[2][i], controlPoints[3][i]];
+                const vGeo = new THREE.BufferGeometry().setFromPoints(vPoints);
+                const vLine = new THREE.Line(vGeo, mat);
+                scene.add(vLine);
+                controlNetLines.push(vLine);
+            }
+        }
+
+        function setupInteractionListeners() {
+            const container = document.getElementById('canvas-container');
+
+            container.addEventListener('pointerdown', (e) => {
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(controlPointSpheres);
+
+                if (intersects.length > 0) {
+                    isDragging = true;
+                    controls.enabled = false;
+                    selectedSphere = intersects[0].object;
+                    selectedSphere.material.emissive.setHex(0x3b82f6);
+                    selectedSphere.material.emissiveIntensity = 0.5;
+
+                    dragPlane.setFromNormalAndCoplanarPoint(
+                        camera.getWorldDirection(new THREE.Vector3()).negate(),
+                        selectedSphere.position
+                    );
+                }
+            });
+
+            container.addEventListener('pointermove', (e) => {
+                if (!isDragging || !selectedSphere) return;
+
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                if (raycaster.ray.intersectPlane(dragPlane, planeIntersect)) {
+                    const { i, j } = selectedSphere.userData;
+                    controlPoints[i][j].copy(planeIntersect);
+                    updateAll();
+                }
+            });
+
+            const stopDragging = () => {
+                if (isDragging && selectedSphere) {
+                    selectedSphere.material.emissive.setHex(0x000000);
+                    selectedSphere = null;
+                    isDragging = false;
+                    controls.enabled = true;
+                }
+            };
+
+            container.addEventListener('pointerup', stopDragging);
+            container.addEventListener('pointerleave', stopDragging);
+        }
+
+        function setupUIControls() {
+            // Sliders
+            const sliderU = document.getElementById('slider-u');
+            const sliderV = document.getElementById('slider-v');
+
+            sliderU.addEventListener('input', (e) => {
+                params.u = parseFloat(e.target.value);
+                document.getElementById('u-value-display').textContent = params.u.toFixed(2);
+                updateAll();
+            });
+
+            sliderV.addEventListener('input', (e) => {
+                params.v = parseFloat(e.target.value);
+                document.getElementById('v-value-display').textContent = params.v.toFixed(2);
+                updateAll();
+            });
+
+            // Evaluation Order Toggle Buttons
+            const btnOrderUV = document.getElementById('btn-order-uv');
+            const btnOrderVU = document.getElementById('btn-order-vu');
+
+            const setEvaluationOrder = (order) => {
+                params.evaluationOrder = order;
+                const isUFirst = order === 'u-first';
+
+                if (isUFirst) {
+                    btnOrderUV.className = "px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-white bg-indigo-600 border-indigo-500 shadow-sm";
+                    btnOrderVU.className = "px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-slate-600 bg-slate-200 border-slate-300 hover:text-slate-900 hover:bg-slate-300";
+                    document.getElementById('order-description').textContent = "First evaluates 4 u-curves (rows), then the transverse v-curve.";
+                    document.getElementById('u-role-desc').textContent = "(4 primary)";
+                    document.getElementById('v-role-desc').textContent = "(transverse)";
+                    document.getElementById('u-slider-help').textContent = "Defines a point on each of the 4 initial u-curves.";
+                    document.getElementById('v-slider-help').textContent = "Defines the output on the newly created v-curve.";
+                    document.getElementById('label-primary-toggle').textContent = "4 Primary u-Curves (Blue)";
+                    document.getElementById('label-transverse-toggle').textContent = "Transverse v-Curve (Green)";
+                    document.getElementById('legend-primary').textContent = "4 Primary u-Curves";
+                    document.getElementById('legend-interm').textContent = "Points u";
+                    document.getElementById('legend-transverse').textContent = "Transverse v-Curve";
+                } else {
+                    btnOrderVU.className = "px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-white bg-indigo-600 border-indigo-500 shadow-sm";
+                    btnOrderUV.className = "px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition text-slate-600 bg-slate-200 border-slate-300 hover:text-slate-900 hover:bg-slate-300";
+                    document.getElementById('order-description').textContent = "First evaluates 4 v-curves (columns), then the transverse u-curve.";
+                    document.getElementById('u-role-desc').textContent = "(transverse)";
+                    document.getElementById('v-role-desc').textContent = "(4 primary)";
+                    document.getElementById('u-slider-help').textContent = "Defines the output on the newly created u-curve.";
+                    document.getElementById('v-slider-help').textContent = "Defines a point on each of the 4 initial v-curves.";
+                    document.getElementById('label-primary-toggle').textContent = "4 Primary v-Curves (Blue)";
+                    document.getElementById('label-transverse-toggle').textContent = "Transverse u-Curve (Green)";
+                    document.getElementById('legend-primary').textContent = "4 Primary v-Curves";
+                    document.getElementById('legend-interm').textContent = "Points v";
+                    document.getElementById('legend-transverse').textContent = "Transverse u-Curve";
+                }
+
+                updateAll();
+            };
+
+            btnOrderUV.addEventListener('click', () => setEvaluationOrder('u-first'));
+            btnOrderVU.addEventListener('click', () => setEvaluationOrder('v-first'));
+
+            // Toggles
+            document.getElementById('toggle-surface').addEventListener('change', (e) => {
+                surfaceMesh.visible = e.target.checked;
+                updateAll();
+            });
+
+            document.getElementById('toggle-control-net').addEventListener('change', (e) => {
+                const visible = e.target.checked;
+                controlPointSpheres.forEach(s => s.visible = visible);
+                controlNetLines.forEach(l => l.visible = visible);
+            });
+
+            document.getElementById('toggle-primary-curves').addEventListener('change', (e) => {
+                const visible = e.target.checked;
+                primaryCurveLines.forEach(l => l.visible = visible);
+                primaryPointsSpheres.forEach(s => s.visible = visible);
+            });
+
+            document.getElementById('toggle-transverse-curve').addEventListener('change', (e) => {
+                transverseCurveLine.visible = e.target.checked;
+            });
+
+            // Presets
+            const setPreset = (name) => {
+                loadPreset(name);
+                updateAll();
+            };
+
+            document.getElementById('btn-preset-flat').addEventListener('click', () => setPreset('flat'));
+            document.getElementById('btn-preset-wave').addEventListener('click', () => setPreset('wave'));
+            document.getElementById('btn-preset-saddle').addEventListener('click', () => setPreset('saddle'));
+            document.getElementById('btn-preset-dome').addEventListener('click', () => setPreset('dome'));
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            if (evaluatedPointSphere) {
+                evaluatedPointSphere.rotation.y += 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Start initialization on window load
+        window.onload = function() {
+            initScene();
+            animate();
+        };
+    </script>
+</body>
+</html>
